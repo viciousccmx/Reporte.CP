@@ -106,4 +106,23 @@ if f_actual and f_anterior:
             t1 = procesar_dashboard(df_act, df_ant, telcel_list)
             t2 = procesar_dashboard(df_act, df_ant, telcel_list, es_top=True)
 
-            orden = ['
+            orden = ['SERVICIO', 'CONTEO ACT_ACT', 'CONTEO ACT_ANT', 'VAR % CONTEO', 'IMPORTE ACT_ACT', 'IMPORTE ACT_ANT', 'VAR % IMPORTE']
+            titulos = {'SERVICIO': 'SERVICIO', 'CONTEO ACT_ACT': 'CONTEO ACT.', 'CONTEO ACT_ANT': 'CONTEO ANT.', 'VAR % CONTEO': 'VAR % (C)', 
+                       'IMPORTE ACT_ACT': 'IMPORTE ACT.', 'IMPORTE ACT_ANT': 'IMPORTE ANT.', 'VAR % IMPORTE': 'VAR % (I)'}
+
+            def formato(df):
+                return df[orden].rename(columns=titulos).style.format({
+                    'CONTEO ACT.': '{:,.0f}', 'CONTEO ANT.': '{:,.0f}', 'VAR % (C)': '{:,.2f}%',
+                    'IMPORTE ACT.': '${:,.2f}', 'IMPORTE ANT.': '${:,.2f}', 'VAR % (I)': '{:,.2f}%'
+                }).applymap(lambda x: 'color: red' if isinstance(x, (int, float)) and x < 0 else '', subset=['VAR % (C)', 'VAR % (I)'])
+
+            st.subheader("Análisis de Servicios Telcel")
+            st.table(formato(t1))
+            st.write("---")
+            st.subheader("Top 5 Otros Servicios (Sumatoria incluye todos los no-Telcel)")
+            st.table(formato(t2))
+
+        except Exception as e:
+            st.error(f"Error en el proceso: {e}")
+else:
+    st.info("Sube ambos archivos para comparar.")
