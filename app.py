@@ -2,7 +2,30 @@ import streamlit as st
 import pandas as pd
 import io
 
-st.set_page_config(page_title="Dashboard Comparativo", layout="wide")
+# 1. Configuracion de la pagina (layout ancho)
+st.set_page_config(page_title="Dashboard Profesional", layout="wide")
+
+# 2. CSS para forzar que los numeros no se corten y las tablas se vean justificadas
+st.markdown("""
+    <style>
+    /* Forzar que el contenido de las tablas no tenga saltos de linea */
+    .stTable td, .stTable th {
+        white-space: nowrap !important;
+        text-align: center !important;
+        padding: 10px 20px !important;
+    }
+    /* Alinear la primera columna (Servicio) a la izquierda */
+    .stTable td:nth-child(1), .stTable th:nth-child(1) {
+        text-align: left !important;
+    }
+    /* Estilo para que la tabla use todo el ancho disponible */
+    .stTable {
+        width: 100%;
+        border-collapse: collapse;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
 st.title("Reporte de Transacciones e Importes")
 
 def cargar_datos(archivo):
@@ -10,21 +33,16 @@ def cargar_datos(archivo):
         return None
     try:
         contenido = archivo.getvalue()
-        # El orden de encodings es vital: utf-8-sig detecta y elimina el BOM (Ï»¿)
-        for enc in ['utf-8-sig', 'utf-8', 'latin1', 'cp1252']:
+        # utf-8-sig para ignorar el BOM (ï»¿)
+        for enc in ['utf-8-sig', 'latin1', 'utf-8', 'cp1252']:
             try:
                 if archivo.name.endswith('.csv'):
                     df = pd.read_csv(io.BytesIO(contenido), encoding=enc, sep=None, engine='python')
                 else:
                     df = pd.read_excel(archivo)
                 
-                # Limpiar nombres de columnas: 
-                # 1. Convertir a string y quitar espacios
-                # 2. Eliminar manualmente residuos de BOM si quedara alguno
-                # 3. Todo a MAYUSCULAS
                 df.columns = [str(c).replace('ï»¿', '').replace('Ï»¿', '').strip().upper() for c in df.columns]
                 
-                # Verificar si la columna clave existe ahora
                 if 'SERVICIO' in df.columns:
                     return df
             except:
@@ -43,31 +61,16 @@ if f_actual and f_anterior:
     df_act = cargar_datos(f_actual)
     df_ant = cargar_datos(f_anterior)
 
-    # Validacion de columnas necesarias
     cols_necesarias = ['SERVICIO', 'CONTEO ACT', 'IMPORTE ACT']
-    error_columnas = False
-
-    for nombre, df in [("ACTUAL", df_act), ("ANTERIOR", df_ant)]:
-        if df is not None:
-            faltantes = [c for c in cols_necesarias if c not in df.columns]
-            if faltantes:
-                st.error(f"⚠️ Error en el archivo {nombre}: Faltan las columnas: {', '.join(faltantes)}")
-                st.write(f"Columnas detectadas en {nombre}:", list(df.columns))
-                error_columnas = True
-        else:
-            st.error(f"No se pudo procesar el archivo {nombre}.")
-            error_columnas = True
-
-    if not error_columnas:
+    
+    if df_act is not None and df_ant is not None and all(c in df_act.columns for c in cols_necesarias):
         try:
-            # Lista de servicios Telcel
             telcel_list = [
                 'TELCEL PAQUETES', 'TELCEL FACTURA', 'TELCEL VENTA DE TIEMPO AIRE', 
                 'AMIGO PAGUITOS', 'TELCEL PAQUETES MIXTOS', 'TELCEL PAQUETES POSPAGO'
             ]
 
             def procesar(df_a, df_p, filtro, es_top=False):
-                # Asegurar limpieza de la columna SERVICIO
                 df_a['SERVICIO'] = df_a['SERVICIO'].astype(str).str.strip().str.upper()
                 df_p['SERVICIO'] = df_p['SERVICIO'].astype(str).str.strip().str.upper()
 
@@ -82,12 +85,9 @@ if f_actual and f_anterior:
                 res = pd.merge(a[cols], df_p[cols], on='SERVICIO', how='left', suffixes=('_ACT', '_ANT')).fillna(0)
 
                 # Calculos de variacion
-                for c_nom in ['CONTEO ACT', 'IMPORTE ACT']:
-                    key = c_nom.split()[0] # CONTEO o IMPORTE
-                    res[f'VAR % {key}'] = 0.0
-                    ant, act = f'{c_nom}_ANT', f'{c_nom}_ACT'
-                    mask = res[ant] != 0
-                    res.loc[mask, f'VAR % {key}'] = ((res[act] - res[ant]) / res[ant]) * 100
+                for key_nom in ['CONTEO', 'IMPORTE']:
+                    ant, act = f'{key_nom} ACT_ANT', f'{key_nom} ACT_ACT'
+                    res[f'VAR % {key_nom}'] = ((res[act] - res[ant]) / res[ant] * 100).replace([float('inf'), -float('inf')], 0).fillna(0)
                 
                 # Fila Sumatoria
                 s_c_act, s_c_ant = res['CONTEO ACT_ACT'].sum(), res['CONTEO ACT_ANT'].sum()
@@ -108,18 +108,32 @@ if f_actual and f_anterior:
 
             orden = ['SERVICIO', 'CONTEO ACT_ACT', 'CONTEO ACT_ANT', 'VAR % CONTEO', 'IMPORTE ACT_ACT', 'IMPORTE ACT_ANT', 'VAR % IMPORTE']
             
-            def formato(df):
-                return df[orden].style.format({
-                    'CONTEO ACT_ACT': '{:,.0f}', 'CONTEO ACT_ANT': '{:,.0f}', 'VAR % CONTEO': '{:,.2f}%',
-                    'IMPORTE ACT_ACT': '${:,.2f}', 'IMPORTE ACT_ANT': '${:,.2f}', 'VAR % IMPORTE': '{:,.2f}%'
+            # Renombrar columnas para que se vean mejor en la tabla
+            titulos = {
+                'SERVICIO': 'SERVICIO',
+                'CONTEO ACT_ACT': 'CONTEO ACT.',
+                'CONTEO ACT_ANT': 'CONTEO ANT.',
+                'VAR % CONTEO': 'VAR. % (C)',
+                'IMPORTE ACT_ACT': 'IMPORTE ACT.',
+                'IMPORTE ACT_ANT': 'IMPORTE ANT.',
+                'VAR % IMPORTE': 'VAR. % (I)'
+            }
+
+            def formato_final(df):
+                df_renamed = df[orden].rename(columns=titulos)
+                return df_renamed.style.format({
+                    'CONTEO ACT.': '{:,.0f}', 'CONTEO ANT.': '{:,.0f}', 'VAR. % (C)': '{:,.2f}%',
+                    'IMPORTE ACT.': '${:,.2f}', 'IMPORTE ANT.': '${:,.2f}', 'VAR. % (I)': '{:,.2f}%'
                 }).applymap(lambda x: 'color: red' if isinstance(x, (int, float)) and x < 0 else '', 
-                          subset=['VAR % CONTEO', 'VAR % IMPORTE'])
+                          subset=['VAR. % (C)', 'VAR. % (I)'])
 
             st.subheader("Análisis de Servicios Telcel")
-            st.table(formato(t1))
+            st.table(formato_final(t1))
+            
             st.write("---")
+            
             st.subheader("Top 5 Otros Servicios")
-            st.table(formato(t2))
+            st.table(formato_final(t2))
 
         except Exception as e:
             st.error(f"Error en el proceso: {e}")
