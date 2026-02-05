@@ -10,24 +10,26 @@ def cargar_datos(archivo):
         return None
     try:
         contenido = archivo.getvalue()
-        # Probamos combinaciones de codificacion y delimitadores
-        for enc in ['utf-8', 'latin1', 'cp1252']:
+        # El orden de encodings es vital: utf-8-sig detecta y elimina el BOM (Ï»¿)
+        for enc in ['utf-8-sig', 'utf-8', 'latin1', 'cp1252']:
             try:
                 if archivo.name.endswith('.csv'):
-                    # sep=None con engine='python' detecta si es coma, punto y coma o tabulador
                     df = pd.read_csv(io.BytesIO(contenido), encoding=enc, sep=None, engine='python')
                 else:
                     df = pd.read_excel(archivo)
                 
-                # Normalizar: quitar espacios y convertir nombres de columnas a MAYUSCULAS
-                df.columns = [str(c).strip().upper() for c in df.columns]
+                # Limpiar nombres de columnas: 
+                # 1. Convertir a string y quitar espacios
+                # 2. Eliminar manualmente residuos de BOM si quedara alguno
+                # 3. Todo a MAYUSCULAS
+                df.columns = [str(c).replace('ï»¿', '').replace('Ï»¿', '').strip().upper() for c in df.columns]
                 
-                # Si encontramos la columna clave, devolvemos el dataframe
+                # Verificar si la columna clave existe ahora
                 if 'SERVICIO' in df.columns:
                     return df
             except:
                 continue
-        return df # Devolvemos lo que se haya podido cargar para inspeccionar columnas
+        return df
     except Exception as e:
         st.error(f"Error al leer {archivo.name}: {e}")
         return None
@@ -41,7 +43,7 @@ if f_actual and f_anterior:
     df_act = cargar_datos(f_actual)
     df_ant = cargar_datos(f_anterior)
 
-    # --- VALIDACION DE COLUMNAS ---
+    # Validacion de columnas necesarias
     cols_necesarias = ['SERVICIO', 'CONTEO ACT', 'IMPORTE ACT']
     error_columnas = False
 
@@ -65,7 +67,7 @@ if f_actual and f_anterior:
             ]
 
             def procesar(df_a, df_p, filtro, es_top=False):
-                # Asegurar que la columna servicio sea texto y mayusculas
+                # Asegurar limpieza de la columna SERVICIO
                 df_a['SERVICIO'] = df_a['SERVICIO'].astype(str).str.strip().str.upper()
                 df_p['SERVICIO'] = df_p['SERVICIO'].astype(str).str.strip().str.upper()
 
@@ -80,11 +82,12 @@ if f_actual and f_anterior:
                 res = pd.merge(a[cols], df_p[cols], on='SERVICIO', how='left', suffixes=('_ACT', '_ANT')).fillna(0)
 
                 # Calculos de variacion
-                for col in ['CONTEO ACT', 'IMPORTE ACT']:
-                    res[f'VAR % {col.split()[0]}'] = 0.0
-                    ant, act = f'{col}_ANT', f'{col}_ACT'
+                for c_nom in ['CONTEO ACT', 'IMPORTE ACT']:
+                    key = c_nom.split()[0] # CONTEO o IMPORTE
+                    res[f'VAR % {key}'] = 0.0
+                    ant, act = f'{c_nom}_ANT', f'{c_nom}_ACT'
                     mask = res[ant] != 0
-                    res.loc[mask, f'VAR % {col.split()[0]}'] = ((res[act] - res[ant]) / res[ant]) * 100
+                    res.loc[mask, f'VAR % {key}'] = ((res[act] - res[ant]) / res[ant]) * 100
                 
                 # Fila Sumatoria
                 s_c_act, s_c_ant = res['CONTEO ACT_ACT'].sum(), res['CONTEO ACT_ANT'].sum()
@@ -99,10 +102,10 @@ if f_actual and f_anterior:
                 }])
                 return pd.concat([res, fila_sum], ignore_index=True)
 
+            # Generar tablas
             t1 = procesar(df_act, df_ant, telcel_list)
             t2 = procesar(df_act, df_ant, telcel_list, es_top=True)
 
-            # Orden final de columnas
             orden = ['SERVICIO', 'CONTEO ACT_ACT', 'CONTEO ACT_ANT', 'VAR % CONTEO', 'IMPORTE ACT_ACT', 'IMPORTE ACT_ANT', 'VAR % IMPORTE']
             
             def formato(df):
@@ -118,7 +121,4 @@ if f_actual and f_anterior:
             st.subheader("Top 5 Otros Servicios")
             st.table(formato(t2))
 
-        except Exception as e:
-            st.error(f"Error en el proceso: {e}")
-else:
-    st.info("Sube ambos archivos para comparar.")
+        except Exception
