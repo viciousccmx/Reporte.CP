@@ -1,31 +1,28 @@
 import streamlit as st
 import pandas as pd
+import chardet
 
-# 1. Configuraci¨®n de la p¨¢gina
-st.set_page_config(page_title="Dashboard Pro", layout="wide")
+st.set_page_config(page_title="Dashboard Comparativo", layout="wide")
 
-st.markdown("""
-    <style>
-    .stTable { width: 100%; }
-    .css-12oz5g7 { padding-top: 2rem; }
-    </style>
-    """, unsafe_allow_html=True)
+st.title("?? Reporte de Transacciones")
 
-st.title("?? Reporte Comparativo de Servicios")
-
-# Funci¨®n de carga ultra-robusta
 def load_data(file):
     if file is None: return None
     try:
         if file.name.endswith('.csv'):
-            # Intenta con 3 codificaciones comunes para evitar errores de decode
-            for encoding in ['utf-8', 'latin1', 'iso-8859-1', 'cp1252']:
-                try:
-                    file.seek(0)
-                    df = pd.read_csv(file, encoding=encoding)
-                    break
-                except UnicodeDecodeError:
-                    continue
+            # Detectar autom¨¢ticamente el encoding del archivo
+            raw_data = file.read()
+            result = chardet.detect(raw_data)
+            encoding_detectado = result['encoding']
+            
+            # Volver al inicio del archivo para leerlo
+            file.seek(0)
+            try:
+                # Intentamos con el detectado, si falla probamos latin1
+                df = pd.read_csv(file, encoding=encoding_detectado)
+            except:
+                file.seek(0)
+                df = pd.read_csv(file, encoding='latin1')
         else:
             df = pd.read_excel(file)
         
@@ -33,13 +30,13 @@ def load_data(file):
         df.columns = [str(c).strip().upper() for c in df.columns]
         return df
     except Exception as e:
-        st.error(f"Error cr¨ªtico al leer {file.name}: {e}")
+        st.error(f"Error al cargar {file.name}: {e}")
         return None
 
 # Sidebar
-st.sidebar.header("Carga de Archivos")
-f_act = st.sidebar.file_uploader("MES ACTUAL", type=["csv", "xlsx"])
-f_ant = st.sidebar.file_uploader("MES ANTERIOR", type=["csv", "xlsx"])
+st.sidebar.header("Carga de Datos")
+f_act = st.sidebar.file_uploader("Archivo MES ACTUAL", type=["csv", "xlsx"])
+f_ant = st.sidebar.file_uploader("Archivo MES ANTERIOR", type=["csv", "xlsx"])
 
 if f_act and f_ant:
     df_act = load_data(f_act)
@@ -47,28 +44,28 @@ if f_act and f_ant:
 
     if df_act is not None and df_ant is not None:
         try:
-            # Lista de servicios (en may¨²sculas para coincidir con el strip().upper())
+            # Lista de servicios en MAY¨²SCULAS
             telcel_list = [
                 'TELCEL PAQUETES', 'TELCEL FACTURA', 'TELCEL VENTA DE TIEMPO AIRE', 
                 'AMIGO PAGUITOS', 'TELCEL PAQUETES MIXTOS', 'TELCEL PAQUETES POSPAGO'
             ]
 
-            def procesar_df(act_df, ant_df, filtro, es_top=False):
+            def procesar(df_a, df_p, filtro, es_top=False):
                 # Limpiar columna servicio
-                act_df['SERVICIO'] = act_df['SERVICIO'].str.strip().str.upper()
-                ant_df['SERVICIO'] = ant_df['SERVICIO'].str.strip().str.upper()
+                df_a['SERVICIO'] = df_a['SERVICIO'].astype(str).str.strip().str.upper()
+                df_p['SERVICIO'] = df_p['SERVICIO'].astype(str).str.strip().str.upper()
 
                 if not es_top:
-                    a = act_df[act_df['SERVICIO'].isin(filtro)].copy()
+                    a = df_a[df_a['SERVICIO'].isin(filtro)].copy()
                 else:
-                    otros = act_df[~act_df['SERVICIO'].isin(filtro)]
+                    otros = df_a[~df_a['SERVICIO'].isin(filtro)]
                     top5 = otros.sort_values('CONTEO ACT', ascending=False).head(5)
-                    a = act_df[act_df['SERVICIO'].isin(top5['SERVICIO'])].copy()
+                    a = df_a[df_a['SERVICIO'].isin(top5['SERVICIO'])].copy()
 
                 # Merge
                 res = pd.merge(
                     a[['SERVICIO', 'CONTEO ACT']], 
-                    ant_df[['SERVICIO', 'CONTEO ACT']], 
+                    df_p[['SERVICIO', 'CONTEO ACT']], 
                     on='SERVICIO', how='left', suffixes=('_ACT', '_ANT')
                 ).fillna(0)
 
@@ -87,19 +84,16 @@ if f_act and f_ant:
                 
                 return pd.concat([res, fila_sum], ignore_index=True)
 
-            # Tablas
-            t1 = procesar_df(df_act, df_ant, telcel_list)
-            t2 = procesar_df(df_act, df_ant, telcel_list, es_top=True)
+            t1 = procesar(df_act, df_ant, telcel_list)
+            t2 = procesar(df_act, df_ant, telcel_list, es_top=True)
 
-            # Formateo visual seguro (sin applymap que suele dar error en web)
+            # Formato visual
             def format_table(df):
-                styled = df.style.format({
+                return df.style.format({
                     'CONTEO ACT_ACT': '{:,.0f}',
                     'CONTEO ACT_ANT': '{:,.0f}',
                     'VAR_%': '{:,.2f}%'
-                })
-                # Pintar de rojo variaciones negativas
-                return styled.apply(lambda x: ['color: red' if isinstance(v, (int, float)) and v < 0 else '' for v in x], subset=['VAR_%'])
+                }).applymap(lambda x: 'color: red' if isinstance(x, (int, float)) and x < 0 else '', subset=['VAR_%'])
 
             st.subheader("An¨¢lisis Servicios Telcel")
             st.table(format_table(t1))
@@ -110,7 +104,6 @@ if f_act and f_ant:
             st.table(format_table(t2))
 
         except Exception as e:
-            st.error(f"Error en el procesamiento de datos: {e}")
-            st.info("Verifica que las columnas se llamen 'SERVICIO' y 'CONTEO ACT'")
+            st.error(f"Error en el procesamiento: {e}")
 else:
-    st.info("Sube ambos archivos para generar el dashboard.")
+    st.info("Sube los archivos en la barra lateral.")
