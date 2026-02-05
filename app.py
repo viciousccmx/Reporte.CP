@@ -4,13 +4,13 @@ import chardet
 
 st.set_page_config(page_title="Dashboard Comparativo", layout="wide")
 
-st.title("?? Reporte de Transacciones")
+st.title("ðŸ“Š Reporte de Transacciones")
 
 def load_data(file):
     if file is None: return None
     try:
         if file.name.endswith('.csv'):
-            # Detectar autom¨¢ticamente el encoding del archivo
+            # Detectar automÃ¡ticamente el encoding del archivo
             raw_data = file.read()
             result = chardet.detect(raw_data)
             encoding_detectado = result['encoding']
@@ -44,7 +44,7 @@ if f_act and f_ant:
 
     if df_act is not None and df_ant is not None:
         try:
-            # Lista de servicios en MAY¨²SCULAS
+            # Lista de servicios en MAYÃšSCULAS
             telcel_list = [
                 'TELCEL PAQUETES', 'TELCEL FACTURA', 'TELCEL VENTA DE TIEMPO AIRE', 
                 'AMIGO PAGUITOS', 'TELCEL PAQUETES MIXTOS', 'TELCEL PAQUETES POSPAGO'
@@ -69,7 +69,7 @@ if f_act and f_ant:
                     on='SERVICIO', how='left', suffixes=('_ACT', '_ANT')
                 ).fillna(0)
 
-                # Variaci¨®n
+                # VariaciÃ³n
                 res['VAR_%'] = 0.0
                 mask = res['CONTEO ACT_ANT'] != 0
                 res.loc[mask, 'VAR_%'] = ((res['CONTEO ACT_ACT'] - res['CONTEO ACT_ANT']) / res['CONTEO ACT_ANT']) * 100
@@ -95,7 +95,7 @@ if f_act and f_ant:
                     'VAR_%': '{:,.2f}%'
                 }).applymap(lambda x: 'color: red' if isinstance(x, (int, float)) and x < 0 else '', subset=['VAR_%'])
 
-            st.subheader("An¨¢lisis Servicios Telcel")
+            st.subheader("AnÃ¡lisis Servicios Telcel")
             st.table(format_table(t1))
 
             st.write("---")
