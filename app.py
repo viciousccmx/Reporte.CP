@@ -121,4 +121,7 @@ if f_actual and f_anterior:
             st.subheader("Top 5 Otros Servicios")
             st.table(formato(t2))
 
-        except Exception
+        except Exception as e:
+            st.error(f"Error en el proceso: {e}")
+else:
+    st.info("Sube ambos archivos para comparar.")
