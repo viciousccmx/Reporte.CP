@@ -1,91 +1,114 @@
 import streamlit as st
 import pandas as pd
 
-# 1. Configuración de la página web
-st.set_page_config(page_title="Dashboard de Servicios", layout="wide")
+# 1. Configuración de la página
+st.set_page_config(page_title="Comparativo Mensual", layout="wide")
 
-# Estilos CSS para mejorar la apariencia
 st.markdown("""
     <style>
     .main { background-color: #f8f9fa; }
-    .stTable { background-color: white; border-radius: 5px; }
-    h1, h2, h3 { color: #003366; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+    h1, h2, h3 { color: #003366; }
     </style>
     """, unsafe_allow_html=True)
 
-st.title("📊 Dashboard de Análisis de Servicios")
+st.title("📊 Comparativo de Transacciones Mensuales")
 
-# 2. Sección para subir el archivo
+# 2. Carga de archivos en la barra lateral
 st.sidebar.header("Carga de Datos")
-uploaded_file = st.sidebar.file_uploader("Sube tu archivo CSV o Excel", type=["csv", "xlsx"])
+file_actual = st.sidebar.file_uploader("Archivo MES ACTUAL", type=["csv", "xlsx"])
+file_pasado = st.sidebar.file_uploader("Archivo MES ANTERIOR", type=["csv", "xlsx"])
 
-if uploaded_file is not None:
+def load_data(file):
+    if file.name.endswith('.csv'):
+        return pd.read_csv(file)
+    return pd.read_excel(file)
+
+def color_variacion(val):
+    """Aplica rojo si la variación es negativa"""
+    color = 'red' if isinstance(val, (int, float)) and val < 0 else 'black'
+    return f'color: {color}'
+
+if file_actual and file_pasado:
     try:
-        # Cargar el archivo según su formato
-        if uploaded_file.name.endswith('.csv'):
-            df = pd.read_csv(uploaded_file)
-        else:
-            df = pd.read_excel(uploaded_file)
+        df_act = load_data(file_actual)
+        df_pas = load_data(file_pasado)
 
-        # 3. Definición de servicios para la primera tabla (Telcel)
+        # Servicios específicos de Telcel
         servicios_telcel = [
-            'Telcel Paquetes', 
-            'Telcel factura', 
-            'Telcel Venta de tiempo aire', 
-            'Amigo Paguitos', 
-            'Telcel Paquetes Mixtos', 
-            'Telcel Paquetes Pospago'
+            'Telcel Paquetes', 'Telcel factura', 'Telcel Venta de tiempo aire', 
+            'Amigo Paguitos', 'Telcel Paquetes Mixtos', 'Telcel Paquetes Pospago'
         ]
-        
-        # Filtrar y preparar Tabla 1
-        df_telcel = df[df['SERVICIO'].isin(servicios_telcel)].copy()
-        df_telcel['SERVICIO'] = pd.Categorical(df_telcel['SERVICIO'], categories=servicios_telcel, ordered=True)
-        df_telcel = df_telcel.sort_values('SERVICIO')
-        
-        cols_finales = ['SERVICIO', 'CONTEO ACT', 'IMPORTE ACT']
-        df_t1 = df_telcel[cols_finales].copy()
-        
-        # Fila de Sumatoria para Tabla 1
-        sum_row_t1 = pd.DataFrame({
-            'SERVICIO': ['SUMATORIA'],
-            'CONTEO ACT': [df_t1['CONTEO ACT'].sum()],
-            'IMPORTE ACT': [df_t1['IMPORTE ACT'].sum()]
-        })
-        df_t1_final = pd.concat([df_t1, sum_row_t1], ignore_index=True)
 
-        # 4. Preparar Tabla 2: Top 5 Otros Servicios
-        df_otros = df[~df['SERVICIO'].isin(servicios_telcel)].copy()
-        df_top5 = df_otros.sort_values(by='CONTEO ACT', ascending=False).head(5)
-        df_t2 = df_top5[cols_finales].copy()
-        
-        # Fila de Sumatoria para Tabla 2
-        sum_row_t2 = pd.DataFrame({
-            'SERVICIO': ['SUMATORIA'],
-            'CONTEO ACT': [df_t2['CONTEO ACT'].sum()],
-            'IMPORTE ACT': [df_t2['IMPORTE ACT'].sum()]
-        })
-        df_t2_final = pd.concat([df_t2, sum_row_t2], ignore_index=True)
+        def procesar_tabla(df_a, df_p, lista_servicios, es_top5=False):
+            # Filtrar por los servicios deseados
+            if not es_top5:
+                # Caso Telcel: Filtro fijo
+                a = df_a[df_a['SERVICIO'].isin(lista_servicios)].copy()
+                p = df_p[df_p['SERVICIO'].isin(lista_servicios)].copy()
+            else:
+                # Caso Top 5: Excluir Telcel del actual y tomar los 5 mayores
+                df_otros_act = df_a[~df_a['SERVICIO'].isin(lista_servicios)]
+                top5_nombres = df_otros_act.sort_values('CONTEO ACT', ascending=False).head(5)['SERVICIO'].tolist()
+                a = df_a[df_a['SERVICIO'].isin(top5_nombres)].copy()
+                p = df_p[df_p['SERVICIO'].isin(top5_nombres)].copy()
 
-        # 5. Mostrar Dashboards en Columnas
+            # Unir datos del mes actual y pasado
+            res = pd.merge(
+                a[['SERVICIO', 'CONTEO ACT']], 
+                p[['SERVICIO', 'CONTEO ACT']], 
+                on='SERVICIO', 
+                how='left', 
+                suffixes=(' (Actual)', ' (Anterior)')
+            ).fillna(0)
+
+            # Calcular Variación
+            res['% Variación'] = ((res['CONTEO ACT (Actual)'] - res['CONTEO ACT (Anterior)']) / res['CONTEO ACT (Anterior)']) * 100
+            res.replace([float('inf'), -float('inf')], 0, inplace=True) # Manejo de división por cero
+            
+            # Fila de Sumatoria
+            sum_act = res['CONTEO ACT (Actual)'].sum()
+            sum_ant = res['CONTEO ACT (Anterior)'].sum()
+            sum_var = ((sum_act - sum_ant) / sum_ant * 100) if sum_ant != 0 else 0
+            
+            fila_sum = pd.DataFrame([{
+                'SERVICIO': 'SUMATORIA',
+                'CONTEO ACT (Actual)': sum_act,
+                'CONTEO ACT (Anterior)': sum_ant,
+                '% Variación': sum_var
+            }])
+            
+            return pd.concat([res, fila_sum], ignore_index=True)
+
+        # Generar tablas
+        tabla_telcel = procesar_tabla(df_act, df_pas, servicios_telcel)
+        tabla_top5 = procesar_tabla(df_act, df_pas, servicios_telcel, es_top5=True)
+
+        # Mostrar en columnas
         col1, col2 = st.columns(2)
 
         with col1:
             st.subheader("Análisis Servicios Telcel")
-            st.dataframe(df_t1_final.style.format({
-                "CONTEO ACT": "{:,.0f}",
-                "IMPORTE ACT": "${:,.2f}"
-            }), use_container_width=True, hide_index=True)
+            st.dataframe(
+                tabla_telcel.style.format({
+                    "CONTEO ACT (Actual)": "{:,.0f}",
+                    "CONTEO ACT (Anterior)": "{:,.0f}",
+                    "% Variación": "{:,.2f}%"
+                }).applymap(color_variacion, subset=['% Variación']),
+                use_container_width=True, hide_index=True
+            )
 
         with col2:
-            st.subheader("Top 5 Otros Servicios")
-            st.dataframe(df_t2_final.style.format({
-                "CONTEO ACT": "{:,.0f}",
-                "IMPORTE ACT": "${:,.2f}"
-            }), use_container_width=True, hide_index=True)
-
-        st.success("Dashboard generado correctamente.")
+            st.subheader("Top 5 Otros Servicios (vs Mes Anterior)")
+            st.dataframe(
+                tabla_top5.style.format({
+                    "CONTEO ACT (Actual)": "{:,.0f}",
+                    "CONTEO ACT (Anterior)": "{:,.0f}",
+                    "% Variación": "{:,.2f}%"
+                }).applymap(color_variacion, subset=['% Variación']),
+                use_container_width=True, hide_index=True
+            )
 
     except Exception as e:
-        st.error(f"Error al procesar el archivo: {e}")
+        st.error(f"Hubo un error al procesar los archivos. Asegúrate de que ambos tengan la columna 'SERVICIO' y 'CONTEO ACT'. Error: {e}")
 else:
-    st.info("👋 Bienvenida/o. Por favor, carga un archivo desde la barra lateral para comenzar.")
+    st.info("Sube ambos archivos (Mes Actual y Mes Anterior) para ver la comparativa.")
